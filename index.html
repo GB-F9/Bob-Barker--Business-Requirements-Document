@@ -408,6 +408,29 @@
             gap: 10px;
         }
 
+        .filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-controls select {
+            padding: 10px 15px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: white;
+            color: #667eea;
+        }
+
+        .filter-controls select:hover {
+            background: #667eea;
+            color: white;
+        }
+
         .btn {
             padding: 10px 20px;
             border: none;
@@ -486,9 +509,28 @@
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="🔍 Search requirements...">
             </div>
+            <div class="filter-controls">
+                <label for="statusFilter" style="font-size: 14px; font-weight: 600; color: #495057;">Filter by Status:</label>
+                <select id="statusFilter" class="btn" style="min-width: 180px;" onchange="applyFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="accurate">✓ Accurate</option>
+                    <option value="not-applicable">✗ Not Applicable</option>
+                    <option value="needs-revision">⚠ Needs Revision</option>
+                    <option value="not-set">No Status Set</option>
+                </select>
+            </div>
+            <div class="filter-controls">
+                <label for="commentFilter" style="font-size: 14px; font-weight: 600; color: #495057;">Filter by Comments:</label>
+                <select id="commentFilter" class="btn" style="min-width: 180px;" onchange="applyFilters()">
+                    <option value="">All</option>
+                    <option value="with-comments">With Comments</option>
+                    <option value="without-comments">Without Comments</option>
+                </select>
+            </div>
             <div class="expand-collapse-all">
                 <button class="btn" onclick="expandAll()">Expand All</button>
                 <button class="btn" onclick="collapseAll()">Collapse All</button>
+                <button class="btn" onclick="clearFilters()">Clear Filters</button>
                 <button class="btn" onclick="document.getElementById('csvFileInput').click()">Import CSV</button>
                 <button class="btn" onclick="exportStatuses()">Export Selections</button>
                 <button class="btn" onclick="clearAllSelections()" style="background: #d63031; color: white; border-color: #d63031;">Clear All</button>
@@ -1124,7 +1166,9 @@
 }
 
         let currentFilters = {
-            search: ''
+            search: '',
+            status: '',
+            comments: ''
         };
 
         function initializePage() {
@@ -1149,6 +1193,9 @@
             // Save to localStorage
             saveRequirementStatus(reqId, status);
             updateStatusCounts();
+            
+            // Reapply filters to update visibility
+            applyFilters();
         }
 
         function saveRequirementStatus(reqId, status) {
@@ -1208,6 +1255,11 @@
                     delete savedComments[reqId];
                 }
                 localStorage.setItem('requirementComments', JSON.stringify(savedComments));
+                
+                // Reapply filters to update visibility if comment filter is active
+                if (currentFilters.comments !== '') {
+                    applyFilters();
+                }
             } catch (error) {
                 console.error('Error saving comment:', error);
                 showNotification('Error saving comment', 'error');
@@ -1284,6 +1336,7 @@
             }
             
             updateStatusCounts();
+            applyFilters(); // Reapply filters after import
         }
 
         function parseCSVLine(line) {
@@ -1451,6 +1504,33 @@
                 currentFilters.search = e.target.value.toLowerCase();
                 applyFilters();
             });
+            
+            document.getElementById('statusFilter').addEventListener('change', (e) => {
+                currentFilters.status = e.target.value;
+                applyFilters();
+            });
+            
+            document.getElementById('commentFilter').addEventListener('change', (e) => {
+                currentFilters.comments = e.target.value;
+                applyFilters();
+            });
+        }
+        
+        function clearFilters() {
+            // Reset all filters
+            currentFilters.search = '';
+            currentFilters.status = '';
+            currentFilters.comments = '';
+            
+            // Reset UI elements
+            document.getElementById('searchInput').value = '';
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('commentFilter').value = '';
+            
+            // Reapply filters (which will show everything)
+            applyFilters();
+            
+            showNotification('Filters cleared', 'success');
         }
 
         function renderContent() {
@@ -1593,6 +1673,10 @@
         function applyFilters() {
             const categories = document.querySelectorAll('.category');
             let visibleCount = 0;
+            
+            // Get saved data for filtering
+            const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
+            const savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
 
             categories.forEach(category => {
                 const types = category.querySelectorAll('.type-section');
@@ -1603,10 +1687,33 @@
                     let typeHasVisible = false;
 
                     requirements.forEach(req => {
+                        const reqId = req.dataset.reqId;
+                        const reqStatus = savedStatuses[reqId] || '';
+                        const reqComment = savedComments[reqId] || '';
+                        
+                        // Search filter
                         const matchesSearch = currentFilters.search === '' || 
                             req.dataset.requirement.includes(currentFilters.search);
+                        
+                        // Status filter
+                        let matchesStatus = true;
+                        if (currentFilters.status !== '') {
+                            if (currentFilters.status === 'not-set') {
+                                matchesStatus = reqStatus === '';
+                            } else {
+                                matchesStatus = reqStatus === currentFilters.status;
+                            }
+                        }
+                        
+                        // Comment filter
+                        let matchesComment = true;
+                        if (currentFilters.comments === 'with-comments') {
+                            matchesComment = reqComment.trim() !== '';
+                        } else if (currentFilters.comments === 'without-comments') {
+                            matchesComment = reqComment.trim() === '';
+                        }
 
-                        const isVisible = matchesSearch;
+                        const isVisible = matchesSearch && matchesStatus && matchesComment;
 
                         req.style.display = isVisible ? 'block' : 'none';
                         
