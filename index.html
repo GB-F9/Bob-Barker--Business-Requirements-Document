@@ -473,6 +473,7 @@
                             </ul>
                         </li>
                         <li><strong>Add comments</strong> - Provide specific feedback, clarifications, or corrections in the comment field</li>
+                        <li><strong>Import CSV</strong> - If you've already filled out the form, click "Import CSV" to load your previous responses</li>
                         <li><strong>Once finished</strong> - Click the <strong>"Export Selections"</strong> button to download your responses as a CSV file</li>
                         <li><strong>Email the CSV file</strong> to your Five9 Project Manager/Project Engineer for review</li>
                     </ol>
@@ -488,9 +489,11 @@
             <div class="expand-collapse-all">
                 <button class="btn" onclick="expandAll()">Expand All</button>
                 <button class="btn" onclick="collapseAll()">Collapse All</button>
+                <button class="btn" onclick="document.getElementById('csvFileInput').click()">Import CSV</button>
                 <button class="btn" onclick="exportStatuses()">Export Selections</button>
                 <button class="btn" onclick="clearAllSelections()" style="background: #d63031; color: white; border-color: #d63031;">Clear All</button>
             </div>
+            <input type="file" id="csvFileInput" accept=".csv" style="display: none;" onchange="importCSV(event)">
         </div>
 
         <div class="stats">
@@ -1118,7 +1121,7 @@
                                     }
                         ]
             }
-};
+}
 
         let currentFilters = {
             search: ''
@@ -1149,100 +1152,266 @@
         }
 
         function saveRequirementStatus(reqId, status) {
-            let savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
-            if (status) {
-                savedStatuses[reqId] = status;
-            } else {
-                delete savedStatuses[reqId];
+            try {
+                let savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
+                if (status) {
+                    savedStatuses[reqId] = status;
+                } else {
+                    delete savedStatuses[reqId];
+                }
+                localStorage.setItem('requirementStatuses', JSON.stringify(savedStatuses));
+            } catch (error) {
+                console.error('Error saving status:', error);
+                showNotification('Error saving status', 'error');
             }
-            localStorage.setItem('requirementStatuses', JSON.stringify(savedStatuses));
         }
 
         function loadSavedStatuses() {
-            const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
-            const savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
-            
-            Object.keys(savedStatuses).forEach(reqId => {
-                const selectElement = document.getElementById(`status-${reqId}`);
-                if (selectElement) {
-                    const status = savedStatuses[reqId];
-                    selectElement.value = status;
-                    selectElement.classList.add(`status-${status}`);
+            try {
+                const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
+                const savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
+                
+                Object.keys(savedStatuses).forEach(reqId => {
+                    const selectElement = document.getElementById(`status-${reqId}`);
+                    if (selectElement) {
+                        const status = savedStatuses[reqId];
+                        selectElement.value = status;
+                        selectElement.classList.add(`status-${status}`);
+                    }
+                });
+                
+                Object.keys(savedComments).forEach(reqId => {
+                    const commentElement = document.getElementById(`comment-${reqId}`);
+                    if (commentElement) {
+                        commentElement.value = savedComments[reqId];
+                    }
+                });
+                
+                updateStatusCounts();
+            } catch (error) {
+                console.error('Error loading saved data:', error);
+                // Clear corrupted localStorage data
+                localStorage.removeItem('requirementStatuses');
+                localStorage.removeItem('requirementComments');
+                showNotification('Previous data was corrupted and has been cleared. Please start fresh.', 'error');
+            }
+        }
+
+        function saveRequirementComment(reqId, comment) {
+            try {
+                let savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
+                if (comment && comment.trim() !== '') {
+                    // Clean the comment of any control characters before saving
+                    const cleanComment = comment.replace(/[\x00-\x1F\x7F]/g, ' ');
+                    savedComments[reqId] = cleanComment;
+                } else {
+                    delete savedComments[reqId];
                 }
-            });
-            
-            Object.keys(savedComments).forEach(reqId => {
-                const commentElement = document.getElementById(`comment-${reqId}`);
-                if (commentElement) {
-                    commentElement.value = savedComments[reqId];
+                localStorage.setItem('requirementComments', JSON.stringify(savedComments));
+            } catch (error) {
+                console.error('Error saving comment:', error);
+                showNotification('Error saving comment', 'error');
+            }
+        }
+
+        function importCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csvContent = e.target.result;
+                    parseAndApplyCSV(csvContent);
+                    showNotification('CSV imported successfully!', 'success');
+                } catch (error) {
+                    showNotification('Error importing CSV: ' + error.message, 'error');
+                    console.error('CSV import error:', error);
                 }
-            });
+            };
+            reader.readAsText(file);
+            
+            // Reset file input
+            event.target.value = '';
+        }
+
+        function parseAndApplyCSV(csvContent) {
+            // Split into lines
+            const lines = csvContent.split('\n');
+            
+            // Skip header row
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                // Parse CSV line (handles quoted fields)
+                const fields = parseCSVLine(line);
+                if (fields.length < 4) continue;
+                
+                const reqId = fields[0].trim();
+                const statusText = fields[2].trim();
+                const comment = fields[3].trim();
+                
+                // Map status text to value
+                let statusValue = '';
+                if (statusText === 'Accurate') {
+                    statusValue = 'accurate';
+                } else if (statusText === 'Not Applicable - remove') {
+                    statusValue = 'not-applicable';
+                } else if (statusText === 'Needs Revision') {
+                    statusValue = 'needs-revision';
+                }
+                
+                // Apply status
+                if (statusValue) {
+                    const selectElement = document.getElementById(`status-${reqId}`);
+                    if (selectElement) {
+                        selectElement.value = statusValue;
+                        selectElement.classList.remove('status-accurate', 'status-not-applicable', 'status-needs-revision');
+                        selectElement.classList.add(`status-${statusValue}`);
+                        saveRequirementStatus(reqId, statusValue);
+                    }
+                }
+                
+                // Apply comment
+                if (comment) {
+                    const commentElement = document.getElementById(`comment-${reqId}`);
+                    if (commentElement) {
+                        commentElement.value = comment;
+                        saveRequirementComment(reqId, comment);
+                    }
+                }
+            }
             
             updateStatusCounts();
         }
 
-        function saveRequirementComment(reqId, comment) {
-            let savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
-            if (comment && comment.trim() !== '') {
-                savedComments[reqId] = comment;
-            } else {
-                delete savedComments[reqId];
+        function parseCSVLine(line) {
+            const fields = [];
+            let currentField = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                const nextChar = line[i + 1];
+                
+                if (char === '"') {
+                    if (inQuotes && nextChar === '"') {
+                        // Escaped quote
+                        currentField += '"';
+                        i++; // Skip next quote
+                    } else {
+                        // Toggle quote state
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    // End of field
+                    fields.push(currentField);
+                    currentField = '';
+                } else {
+                    currentField += char;
+                }
             }
-            localStorage.setItem('requirementComments', JSON.stringify(savedComments));
+            
+            // Add last field
+            fields.push(currentField);
+            
+            return fields;
+        }
+
+        function escapeCSVField(text) {
+            // Convert to string and handle null/undefined
+            text = String(text || '');
+            
+            // Replace quotes with double quotes
+            text = text.replace(/"/g, '""');
+            
+            // Replace newlines and line breaks with spaces
+            text = text.replace(/[\r\n]+/g, ' ');
+            
+            // Replace tabs with spaces
+            text = text.replace(/\t/g, ' ');
+            
+            // Remove any other control characters
+            text = text.replace(/[\x00-\x1F\x7F]/g, '');
+            
+            return text;
         }
 
         function exportStatuses() {
-            const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
-            const savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
-            
-            // Build export data
-            let exportData = 'Requirement ID,Requirement Name,Status,Comments\n';
-            
-            // Iterate through all requirements in the data structure
-            Object.keys(requirementsData).forEach(category => {
-                Object.keys(requirementsData[category]).forEach(type => {
-                    requirementsData[category][type].forEach(req => {
-                        const status = savedStatuses[req.id] || 'Not Set';
-                        let statusText = '';
-                        if (status === 'needs-revision') statusText = 'Needs Revision';
-                        else if (status === 'not-applicable') statusText = 'Not Applicable - remove';
-                        else if (status === 'accurate') statusText = 'Accurate';
-                        else statusText = status.charAt(0).toUpperCase() + status.slice(1);
-                        
-                        const comment = savedComments[req.id] || '';
-                        exportData += `"${req.id}","${req.requirement.replace(/"/g, '""')}","${statusText}","${comment.replace(/"/g, '""')}"\n`;
+            try {
+                const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
+                const savedComments = JSON.parse(localStorage.getItem('requirementComments') || '{}');
+                
+                // Build export data
+                let exportData = 'Requirement ID,Requirement Name,Status,Comments\n';
+                
+                // Iterate through all requirements in the data structure
+                Object.keys(requirementsData).forEach(category => {
+                    Object.keys(requirementsData[category]).forEach(type => {
+                        requirementsData[category][type].forEach(req => {
+                            const status = savedStatuses[req.id] || 'Not Set';
+                            let statusText = '';
+                            if (status === 'needs-revision') statusText = 'Needs Revision';
+                            else if (status === 'not-applicable') statusText = 'Not Applicable - remove';
+                            else if (status === 'accurate') statusText = 'Accurate';
+                            else statusText = status.charAt(0).toUpperCase() + status.slice(1);
+                            
+                            const comment = savedComments[req.id] || '';
+                            
+                            // Properly escape all fields
+                            const reqId = escapeCSVField(req.id);
+                            const reqName = escapeCSVField(req.requirement);
+                            const reqStatus = escapeCSVField(statusText);
+                            const reqComment = escapeCSVField(comment);
+                            
+                            exportData += `"${reqId}","${reqName}","${reqStatus}","${reqComment}"\n`;
+                        });
                     });
                 });
-            });
-            
-            // Create download link
-            const blob = new Blob([exportData], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'requirements_review_' + new Date().toISOString().split('T')[0] + '.csv';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
+                
+                // Create download link
+                const blob = new Blob([exportData], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'requirements_review_' + new Date().toISOString().split('T')[0] + '.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                showNotification('CSV exported successfully!', 'success');
+            } catch (error) {
+                console.error('Error exporting CSV:', error);
+                showNotification('Error exporting CSV: ' + error.message, 'error');
+            }
         }
 
         function updateStatusCounts() {
-            const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
-            
-            let accurateCount = 0;
-            let notApplicableCount = 0;
-            let revisionCount = 0;
-            
-            Object.values(savedStatuses).forEach(status => {
-                if (status === 'accurate') accurateCount++;
-                else if (status === 'not-applicable') notApplicableCount++;
-                else if (status === 'needs-revision') revisionCount++;
-            });
-            
-            document.getElementById('accurateCount').textContent = accurateCount;
-            document.getElementById('notApplicableCount').textContent = notApplicableCount;
-            document.getElementById('revisionCount').textContent = revisionCount;
+            try {
+                const savedStatuses = JSON.parse(localStorage.getItem('requirementStatuses') || '{}');
+                
+                let accurateCount = 0;
+                let notApplicableCount = 0;
+                let revisionCount = 0;
+                
+                Object.values(savedStatuses).forEach(status => {
+                    if (status === 'accurate') accurateCount++;
+                    else if (status === 'not-applicable') notApplicableCount++;
+                    else if (status === 'needs-revision') revisionCount++;
+                });
+                
+                document.getElementById('accurateCount').textContent = accurateCount;
+                document.getElementById('notApplicableCount').textContent = notApplicableCount;
+                document.getElementById('revisionCount').textContent = revisionCount;
+            } catch (error) {
+                console.error('Error updating status counts:', error);
+                // Reset counts to 0 if there's an error
+                document.getElementById('accurateCount').textContent = 0;
+                document.getElementById('notApplicableCount').textContent = 0;
+                document.getElementById('revisionCount').textContent = 0;
+            }
         }
 
         function showNotification(message, type = 'success') {
