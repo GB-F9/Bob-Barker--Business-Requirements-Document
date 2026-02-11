@@ -500,7 +500,7 @@
                         <li><strong>Once finished</strong> - Click the <strong>"Export Selections"</strong> button to download your responses as a CSV file</li>
                         <li><strong>Email the CSV file</strong> to your Five9 Project Manager/Project Engineer for review</li>
                     </ol>
-                    <p><strong>Note:</strong> Your selections are saved automatically in your browser. You can close and return to this page later to continue your review.</p>
+                    <p><strong>Note:</strong> Your selections are saved automatically in your browser. You can close and return to this page later to continue your review. If responses have been uploaded by your PM, they will load automatically when you open the page.</p>
                 </div>
             </details>
         </div>
@@ -1171,12 +1171,43 @@
             comments: ''
         };
 
+        // AUTO-LOAD CSV CONFIGURATION
+        // Set this to your GitHub raw CSV URL to auto-load responses when page opens
+        // Example: 'https://raw.githubusercontent.com/gb-f9/Bob-Barker--Business-Requirements-Document/main/responses.csv'
+        // Leave empty ('') to disable auto-loading
+        const AUTO_LOAD_CSV_URL = '';
+
         function initializePage() {
             renderContent();
             collapseAll(); // Start with all categories collapsed
             setupEventListeners();
             updateStats();
             loadSavedStatuses();
+            
+            // Auto-load CSV if URL is configured
+            if (AUTO_LOAD_CSV_URL && AUTO_LOAD_CSV_URL.trim() !== '') {
+                autoLoadCSV();
+            }
+        }
+
+        async function autoLoadCSV() {
+            try {
+                showNotification('Loading responses...', 'success');
+                const response = await fetch(AUTO_LOAD_CSV_URL);
+                
+                if (!response.ok) {
+                    // CSV file doesn't exist yet - that's okay, just continue
+                    console.log('No auto-load CSV file found - continuing without it');
+                    return;
+                }
+                
+                const csvContent = await response.text();
+                parseAndApplyCSV(csvContent);
+                showNotification('Responses loaded successfully!', 'success');
+            } catch (error) {
+                // File doesn't exist or network error - continue without it
+                console.log('Auto-load CSV not available:', error.message);
+            }
         }
 
         function updateRequirementStatus(reqId, status) {
